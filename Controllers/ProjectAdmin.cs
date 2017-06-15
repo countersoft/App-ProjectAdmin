@@ -461,12 +461,11 @@ namespace ProjectAdmin
             });
         }
 
-        [AppUrl("projectgroupeditor")]
-        public ActionResult ProjectGroupsEditor(int id, int projectId)
+        private List<int> GetExcludedUsers(int projectId)
         {
             GlobalConfigurationWidgetData<ProjectAdminConfigModel> data = GeminiContext.GlobalConfigurationWidgetStore.Get<ProjectAdminConfigModel>(AppGuid);
-            
-            List<int> excludeUserFromGroups = new List<int>();            
+
+            List<int> excludeUserFromGroups = new List<int>();
 
             if (data != null && data.Value != null && data.Value.Data != null && data.Value.Data.ExcludeUserFromGroups.Count > 0)
             {
@@ -475,11 +474,19 @@ namespace ProjectAdmin
                 foreach (var group in excludedProjectGroups)
                 {
                     excludeUserFromGroups.AddRange(group.Members.
-                        Where(a => (a.ProjectId == projectId || a.ProjectId == null) 
+                        Where(a => (a.ProjectId == projectId || a.ProjectId == null)
                             && a.UserId != Countersoft.Gemini.Commons.Constants.AnonymousUserId
                             && a.UserId != Countersoft.Gemini.Commons.Constants.SystemAccountUserId).Select(s => s.UserId));
                 }
             }
+
+            return excludeUserFromGroups;
+        }
+
+        [AppUrl("projectgroupeditor")]
+        public ActionResult ProjectGroupsEditor(int id, int projectId)
+        {
+            List<int> excludeUserFromGroups = GetExcludedUsers(projectId);
 
             ProjectAdminProjectGroupMembersModel model = new ProjectAdminProjectGroupMembersModel();
 
@@ -579,9 +586,14 @@ namespace ProjectAdmin
                 projectGroupManager.CreateMembership(new ProjectGroupMembership() { ProjectGroupId = group.Id, UserId = newMember, ProjectId = projectId });
             }
 
+            var excludedUsers = GetExcludedUsers(projectId.GetValueOrDefault());
             foreach (var removedMember in removedMembers)
             {
-                projectGroupManager.DeleteMembership(group.Id, removedMember, projectId);
+                // Check if the removed member is not part of the exclude settings and then remove!
+                if (!excludedUsers.Contains(removedMember))
+                {
+                    projectGroupManager.DeleteMembership(group.Id, removedMember, projectId);
+                }
             }
 
             if (groupId == Countersoft.Gemini.Commons.Constants.GlobalGroupAdministrators)
@@ -594,7 +606,7 @@ namespace ProjectAdmin
             groupMembers.RemoveAll(m => m.UserId == Countersoft.Gemini.Commons.Constants.SystemAccountUserId);
             group.Members = groupMembers;
 
-            int myProjects = group.Members.FindAll(m => m.ProjectId == projectId.Value).Count();
+            int myProjects = group.Members.FindAll(m => m.ProjectId == projectId.Value && !excludedUsers.Contains(m.UserId)).Count();
 
             return JsonSuccess(new
             {
